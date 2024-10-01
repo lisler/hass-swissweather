@@ -98,14 +98,15 @@ class Forecast:
     timestamp: datetime
     icon: int
     condition: str | None # None if icon is unrecognized.
-    temperatureMax: FloatValue
-    temperatureMin: FloatValue
-    precipitation: FloatValue
-    # Only available for hourly forecast
-    temperatureMean: FloatValue | None = None
     windSpeed: FloatValue | None = None
     windDirection: FloatValue | None = None
     windGustSpeed: FloatValue | None = None
+    temperatureMin: FloatValue | None = None
+    temperatureMean: FloatValue | None = None
+    temperatureMax: FloatValue | None = None
+    precipitationMin: FloatValue | None = None
+    precipitation: FloatValue | None = None
+    precipitationMax: FloatValue | None = None
 
 @dataclass
 class WeatherForecast(object):
@@ -229,27 +230,98 @@ class MeteoClient(object):
             return None
         startTimestamp = datetime.fromtimestamp(startTimestampEpoch / 1000, UTC)
 
+        # Set a second start time
+        startLowResolutionTimestampEpoch = to_int(graphJson.get('startLowResolution', None))
+        if startLowResolutionTimestampEpoch is None:
+            return None
+        startLowResolutionTimestamp = datetime.fromtimestamp(startLowResolutionTimestampEpoch / 1000, UTC)
 
         forecast = []
-        temperatureMaxList = [ (value, "°C") for value in graphJson.get("temperatureMax1h", [])]
-        temperatureMeanList = [ (value, "°C") for value in graphJson.get("temperatureMean1h", [])]
-        temperatureMinList = [ (value, "°C") for value in graphJson.get("temperatureMin1h", [])]
-        precipitationList = [ (value, "mm") for value in graphJson.get("precipitation1h", [])]
-        windGustSpeedList = [ (value, "km/h") for value in graphJson.get("gustSpeed1h", [])]
-        windSpeedList = [ (value, "km/h") for value in graphJson.get("windSpeed1h", [])]
+        temperatureMax1hList = [ (value, "°C") for value in graphJson.get("temperatureMax1h", [])]
+        temperatureMean1hList = [ (value, "°C") for value in graphJson.get("temperatureMean1h", [])]
+        temperatureMin1hList = [ (value, "°C") for value in graphJson.get("temperatureMin1h", [])]
+        precipitation1hList = [ (value, "mm") for value in graphJson.get("precipitation1h", [])]
+        preciptiationMax1hList = [ (value, "mm") for value in graphJson.get("precipitationMax1h", [])]
+        preciptiationMin1hList = [ (value, "mm") for value in graphJson.get("precipitationMin1h", [])]
+        windGustSpeed1hList = [ (value, "km/h") for value in graphJson.get("gustSpeed1h", [])]
+        windSpeed1hList = [ (value, "km/h") for value in graphJson.get("windSpeed1h", [])]
 
-        # We get icons only once every 3 hours so we need to expand each elemen 3-times to match
-        iconList = list(itertools.chain.from_iterable(itertools.repeat(x, 3) for x in graphJson.get("weatherIcon3h", [])))
-        windDirectionlist = list(itertools.chain.from_iterable(itertools.repeat((x, "°"), 3) for x in graphJson.get("windDirection3h", [])))
+        # Add precipitation10m with 10 minute resolution forecast
+        precipitation10mList = [ (value, "mm") for value in graphJson.get("precipitation10m", [])]
+        precipitationMin10mList = [ (value, "mm") for value in graphJson.get("precipitationMin10m", [])]
+        precipitationMax10mList = [ (value, "mm") for value in graphJson.get("precipitationMax10m", [])]
+        deltaListLength = len(temperatureMean1hList) - len(precipitation1hList)
+        
+        # Add weatherIcon3h, windDirection3h, windSpeed3h with 3 hour resolution forecast
+        weatherIcon3hList = [ value for value in graphJson.get("weatherIcon3h", []) ]
+        windDirection3hlist = [ (value, "°") for value in graphJson.get("windDirection3h", []) ]
 
-        # This is the minimum amount of data we have
-        minForecastHours = min(len(temperatureMaxList), len(temperatureMeanList), len(temperatureMinList), len(precipitationList), len(iconList))
-        timestampList = [ startTimestamp + timedelta(hours=value) for value in range(0, minForecastHours) ]
-
-        for ts, icon, tMax, tMean, tMin, precipitation, windDirection, windSpeed, windGustSpeed in zip(timestampList, iconList, temperatureMaxList,
-                                                        temperatureMeanList, temperatureMinList, precipitationList, windDirectionlist, windSpeedList, windGustSpeedList, strict=False):
-            forecast.append(Forecast(ts, icon, ICON_TO_CONDITION_MAP.get(icon), tMax, tMin, precipitation, windSpeed=windSpeed, windDirection=windDirection,
-                                      windGustSpeed=windGustSpeed, temperatureMean=tMean))
+        # TimestampList
+        timestamp10mList = [ startTimestamp + timedelta(minutes=10*value) for value in range(0, min(len(precipitation10mList), len(precipitationMin10mList), len(precipitationMax10mList))) ]
+        timestamp1hList = [ startTimestamp + timedelta(hours=value) for value in range(0, min(len(temperatureMean1hList), len(temperatureMax1hList), len(temperatureMin1hList))) ]
+        timestamp1hLowResolutionList = [ startLowResolutionTimestamp + timedelta(hours=value) for value in range(0, min(len(precipitation1hList), len(preciptiationMax1hList), len(preciptiationMin1hList), len(windGustSpeed1hList), len(windSpeed1hList))) ]
+        timestamp3hList = [ startTimestamp + timedelta(hours=3*value) for value in range(0, min(len(windDirection3hlist), len(weatherIcon3hList))) ]
+        # for ts, icon, tMax, tMean, tMin, precipitation, windDirection, windSpeed, windGustSpeed in zip(timestampList, weatherIcon3hList, temperatureMax1hList, 
+                                                        # temperatureMean1hList, temperatureMin1hList, precipitation1hList, windDirection3hlist, windSpeed3hList):
+            # forecast.append(Forecast(ts, icon, ICON_TO_CONDITION_MAP.get(icon, None), tMax, tMin, precipitation, windSpeed=windSpeed, windDirection=windDirection,
+                                    #   windGustSpeed=windGustSpeed, temperatureMean=tMean))
+        
+        # Add to forecast, depending on resolution
+        ts = min(startTimestamp, startLowResolutionTimestamp)
+        i10m = i1h = i1hLowResolution = i3h = 0
+        logger.info(f"Merging the following: ")
+        logger.info(f"10min resolution: {len(timestamp10mList)} items from {timestamp10mList[0]} to {timestamp10mList[-1]}")
+        logger.info(f"1h low resolution: {len(timestamp1hLowResolutionList)} items from {timestamp1hLowResolutionList[0]} to {timestamp1hLowResolutionList[-1]}")
+        logger.info(f"1h resolution: {len(timestamp1hList)} items from {timestamp1hList[0]} to {timestamp1hList[-1]}")
+        logger.info(f"3h resolution: {len(timestamp3hList)} items from {timestamp3hList[0]} to {timestamp3hList[-1]}")
+        lastTimestamp = max(timestamp10mList[-1], timestamp1hList[-1], timestamp1hLowResolutionList[-1], timestamp3hList[-1])
+        while ts <= lastTimestamp:
+            weatherIcon = windDirection = windSpeed = temperatureMin = temperatureMean = temperatureMax = precipitationMin = precipitation = precipitationMax = windGustSpeed = windSpeed = None
+            nextTimestamp = lastTimestamp + timedelta(minutes=10)
+            if  i3h < len(timestamp3hList) and ts == timestamp3hList[i3h]:
+                weatherIcon = weatherIcon3hList[i3h]
+                windDirection = windDirection3hlist[i3h]
+                i3h += 1
+            if i3h < len(timestamp3hList):
+                nextTimestamp = min(nextTimestamp, timestamp3hList[i3h])
+            if i1h < len(timestamp1hList) and ts == timestamp1hList[i1h]:
+                temperatureMin = temperatureMin1hList[i1h]
+                temperatureMean = temperatureMean1hList[i1h]
+                temperatureMax = temperatureMax1hList[i1h]
+                i1h += 1
+            if i1h < len(timestamp1hList):
+                nextTimestamp = min(nextTimestamp, timestamp1hList[i1h])
+            if i1hLowResolution < len(timestamp1hLowResolutionList) and ts == timestamp1hLowResolutionList[i1hLowResolution]:
+                precipitationMin = preciptiationMin1hList[i1hLowResolution]
+                precipitation = precipitation1hList[i1hLowResolution]
+                precipitationMax = preciptiationMax1hList[i1hLowResolution]
+                windGustSpeed = windGustSpeed1hList[i1hLowResolution]
+                windSpeed = windSpeed1hList[i1hLowResolution]
+                i1hLowResolution += 1
+            if i1hLowResolution < len(timestamp1hLowResolutionList):
+                nextTimestamp = min(nextTimestamp, timestamp1hLowResolutionList[i1hLowResolution])
+            if i10m < len(timestamp10mList) and ts == timestamp10mList[i10m]:
+                precipitationMin = precipitationMin10mList[i10m]
+                precipitation = precipitation10mList[i10m]
+                precipitationMax = precipitationMax10mList[i10m]
+                i10m += 1
+            if i10m < len(timestamp10mList):
+                nextTimestamp = min(nextTimestamp, timestamp10mList[i10m])
+            if ts >= (datetime.now(UTC) - timedelta(hours=1)):
+                forecast.append(Forecast(timestamp=ts,
+                                        icon=weatherIcon, 
+                                        condition=ICON_TO_CONDITION_MAP.get(weatherIcon, None), 
+                                        windSpeed=windSpeed, 
+                                        windDirection=windDirection,
+                                        windGustSpeed=windGustSpeed, 
+                                        temperatureMin=temperatureMin,
+                                        temperatureMean=temperatureMean,
+                                        temperatureMax=temperatureMax,
+                                        precipitationMin=precipitationMin,
+                                        precipitation=precipitation,
+                                        precipitationMax=precipitationMax))
+            ts = nextTimestamp
+        logger.info(f"merged to {len(forecast)} items from {forecast[0].timestamp} to {forecast[-1].timestamp}")
         return forecast
 
     def _get_current_weather_line_for_station(self, station):

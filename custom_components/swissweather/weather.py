@@ -151,22 +151,22 @@ class SwissWeather(CoordinatorEntity[SwissWeatherDataCoordinator], WeatherEntity
         return [self.meteo_forecast_to_forecast(entry, True) for entry in forecast_data]
 
     def meteo_forecast_to_forecast(self, meteo_forecast, isHourly) -> Forecast:
-        if isHourly:
-            temperature = meteo_forecast.temperatureMean[0]
-            wind_speed = meteo_forecast.windSpeed[0]
-            wind_bearing = meteo_forecast.windDirection[0]
-            wind_gust_speed = meteo_forecast.windGustSpeed[0]
-        else:
-            temperature = meteo_forecast.temperatureMax[0]
-            wind_speed = None
-            wind_bearing = None
-            wind_gust_speed = None
+        forecast = {"datetime": meteo_forecast.timestamp.isoformat()}
+        if meteo_forecast.condition: forecast["condition"] = meteo_forecast.condition
+        if meteo_forecast.precipitation: forecast["native_precipitation"] = meteo_forecast.precipitation[0]
+        if meteo_forecast.temperatureMin: forecast["native_templow"] = meteo_forecast.temperatureMin[0]
+        if meteo_forecast.windSpeed: forecast["native_wind_speed"] = meteo_forecast.windSpeed[0]
+        if meteo_forecast.windGustSpeed: forecast["native_wind_gust_speed"] = meteo_forecast.windGustSpeed[0]
+        if meteo_forecast.windDirection: forecast["wind_bearing"] = meteo_forecast.windDirection[0]
+        
+        # hacks
+        if meteo_forecast.temperatureMax: forecast["humidity"] = meteo_forecast.temperatureMax[0]
+        if meteo_forecast.precipitationMax: forecast["native_pressure"] = meteo_forecast.precipitationMax[0]
+        if meteo_forecast.precipitationMin: forecast["native_dew_point"] = meteo_forecast.precipitationMin[0]
 
-        return Forecast(condition=meteo_forecast.condition,
-                datetime=meteo_forecast.timestamp.isoformat(),
-                native_precipitation=meteo_forecast.precipitation[0],
-                native_temperature=temperature,
-                native_templow=meteo_forecast.temperatureMin[0],
-                native_wind_speed=wind_speed,
-                native_wind_gust_speed=wind_gust_speed,
-                wind_bearing=wind_bearing)
+        if isHourly:
+            if meteo_forecast.temperatureMean: forecast["native_temperature"] = meteo_forecast.temperatureMean[0]
+        else:
+            if meteo_forecast.temperatureMax: forecast["native_temperature"] = meteo_forecast.temperatureMax[0]
+        # _LOGGER.info(f"temperatureMean: {meteo_forecast.temperatureMean}") if meteo_forecast.temperatureMean else _LOGGER.info(f"temperatureMean not set")
+        return Forecast(**forecast)
