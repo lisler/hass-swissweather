@@ -160,9 +160,10 @@ class SwissWeather(CoordinatorEntity[SwissWeatherDataCoordinator], WeatherEntity
         if meteo_forecast.windDirection: forecast["wind_bearing"] = meteo_forecast.windDirection[0]
         
         # hacks
-        if meteo_forecast.temperatureMax: forecast["humidity"] = meteo_forecast.temperatureMax[0]
+        if meteo_forecast.temperatureMax: forecast["native_apparent_temperature"] = meteo_forecast.temperatureMax[0]
         if meteo_forecast.precipitationMax: forecast["native_pressure"] = meteo_forecast.precipitationMax[0]
         if meteo_forecast.precipitationMin: forecast["native_dew_point"] = meteo_forecast.precipitationMin[0]
+        if meteo_forecast.sunshine: forecast["uv_index"] = meteo_forecast.sunshine[0]
 
         if isHourly:
             if meteo_forecast.temperatureMean: forecast["native_temperature"] = meteo_forecast.temperatureMean[0]
